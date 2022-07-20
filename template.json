@@ -1,0 +1,138 @@
+"Description": "",
+        "Parameters": {
+            "IngressLambdaName": {
+                "Type": "String",
+                "Description": "Name of the lambda behind Api Gateway",
+                "Default": "LambdaIngress"
+            }
+        },
+
+        "Mappings": {
+
+        },
+
+        "Resources": {
+            "ApiGatewayToLambdaRole": {
+                "Type": "AWS::IAM::Role",
+                "Properties": {
+                    "AssumeRolePolicyDocument": {
+                        "Version": "2012-10-17",
+                        "Statement": [ {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [ "apigateway.amazonaws.com" ]
+                            },
+                            "Action": "sts:AssumeRole"
+                        }]
+                    },
+                    "Policies": [{
+                        "PolicyName": "ApiGatewayToLambdaPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [{
+                                "Effect": "Allow",
+                                "Action": [
+                                    "lambda:InvokeFunction"
+                                ],
+                                "Resource": "*"
+                            }]
+                        }
+                    }]
+                }
+            },
+
+            "IngressLambda":{
+                "Type": "AWS::Lambda::Function",
+                "Properties": {
+                    "Handler": "index.handler",
+                    "FunctionName": {"Ref": "IngressLambdaName"},
+                    "Runtime": "nodejs4.3",
+                    "Role": { "Fn::GetAtt": ["**Role that isn't shown here**", "Arn"]},
+                    "Code": {
+                        "ZipFile": { "Fn::Join": ["", [
+                            "exports.handler = function(event, context) {",
+                    "  console.log('invoked the lambda!');",
+                    "  context.succeed({statusCode: 200, headers: {}, body: JSON.stringify({message: 'invoked the lambda!'})});",
+                    "};"
+                        ]]}
+                    }
+                }
+
+            },
+
+            "IngressLambdaPermission":{
+                "Type" : "AWS::Lambda::Permission",
+                "Properties" : {
+                    "Action" : "lambda:InvokeFunction",
+                    "FunctionName" : { "Ref" : "IngressLambdaName"},
+                    "Principal" : "apigateway.amazonaws.com",
+                    "SourceArn" : {"Fn::Sub": "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/POST/*"}
+                },
+                "DependsOn": ["IngressLambda"]
+            },
+
+            "RestApi": {
+                "Type": "AWS::ApiGateway::RestApi",
+                "Properties": {
+                    "Name": "API Gateway"
+                }
+            },
+
+            "TagModel": {
+                "Type": "AWS::ApiGateway::Model",
+                "Properties": {
+                    "ContentType": "application/json",
+                    "Name": "Tag",
+                    "RestApiId": { "Ref": "RestApi" },
+                    "Schema": {
+                        "$schema": "http://json-schema.org/draft-04/schema#",
+                        "title": "TagModel",
+                        "type": "object",
+                        "properties": {
+                            "payload": {"type": "object"},
+                            "domain": {"type": "string"}
+                        }
+                    }
+                }
+            },
+
+            "TagsResource": {
+                "Type": "AWS::ApiGateway::Resource",
+                "Properties": {
+                    "RestApiId": { "Ref": "RestApi" },
+                    "ParentId": { "Fn::GetAtt": ["RestApi", "RootResourceId"] },
+                    "PathPart": "tag"
+                }
+            },
+
+            "TagsPost": {
+                "Type": "AWS::ApiGateway::Method",
+                "Properties": {
+                    "ApiKeyRequired": "False",
+                    "AuthorizationType": "NONE",
+                    "HttpMethod": "POST",
+                    "RestApiId": {"Ref": "RestApi"},
+                    "ResourceId": { "Fn::GetAtt": ["RestApi", "RootResourceId"] },
+                    "Integration": {
+                        "Type": "AWS_PROXY",
+                        "IntegrationHttpMethod": "POST",
+                        "PassthroughBehavior": "NEVER", 
+                        "Uri": {"Fn::Join" : ["", ["arn:aws:apigateway:us-west-2:lambda:path/2015-03-31/functions/", {"Fn::GetAtt": ["IngressLambda", "Arn"]}, "/invocations"]]}
+                    }
+                }
+            },
+
+            "RestApiDeployment": {
+                "Type": "AWS::ApiGateway::Deployment",
+                "Properties": {
+                    "RestApiId": { "Ref": "RestApi" },
+                    "StageName": "v1"
+                },
+                "DependsOn": ["RestApi", "TagModel", "TagsResource", "TagsPost"]
+            },
+
+        },
+
+        "Outputs": {
+
+        }
